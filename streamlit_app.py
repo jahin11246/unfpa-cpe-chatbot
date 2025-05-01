@@ -1,56 +1,52 @@
 import streamlit as st
+from langchain_community.llms import HuggingFaceHub
+from langchain.chains import RetrievalQA
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 import pickle
 import os
 import requests
-from pathlib import Path
-from langchain_community.llms import HuggingFaceHub
-from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
 
-# ---- App Config ----
-st.set_page_config(page_title="UNFPA Evaluation Chatbot", page_icon="🤖", layout="centered")
-st.markdown("<h1 style='text-align: center;'>🤖 UNFPA Evaluation Chatbot</h1>", unsafe_allow_html=True)
-st.write("Ask questions based on uploaded UNFPA CPE evaluation documents.")
+VECTORSTORE_URL = "https://huggingface.co/jahin2025/unfpa-cpe-vectorstore/resolve/main/vectorstore.pkl"
+VECTORSTORE_PATH = "vectorstore.pkl"
 
-# ---- Vectorstore: Auto-download if missing ----
-VSTORE_URL = "https://huggingface.co/jahin2025/unfpa-cpe-vectorstore/resolve/main/vectorstore.pkl"
-LOCAL_FILE = "vectorstore.pkl"
+# 1. Download vectorstore.pkl if not present
+if not os.path.exists(VECTORSTORE_PATH):
+    with st.spinner("🔄 Downloading vectorstore..."):
+        r = requests.get(VECTORSTORE_URL)
+        if r.status_code == 200:
+            with open(VECTORSTORE_PATH, "wb") as f:
+                f.write(r.content)
+        else:
+            st.error("❌ Failed to download vectorstore from Hugging Face.")
+            st.stop()
 
-if not Path(LOCAL_FILE).exists():
-    st.info("📥 Downloading vectorstore from Hugging Face...")
-    try:
-        r = requests.get(VSTORE_URL)
-        r.raise_for_status()
-        with open(LOCAL_FILE, "wb") as f:
-            f.write(r.content)
-        st.success("✅ Vectorstore downloaded successfully.")
-    except Exception as e:
-        st.error(f"❌ Failed to download vectorstore: {e}")
-        st.stop()
-
-# ---- Load vectorstore ----
+# 2. Load vectorstore
 try:
-    with open(LOCAL_FILE, "rb") as f:
+    with open(VECTORSTORE_PATH, "rb") as f:
         vectorstore = pickle.load(f)
-except Exception as e:
-    st.error("❌ Failed to load vectorstore. Please ensure the file is valid.")
+except Exception:
+    st.error("❌ Failed to load vectorstore. Please ensure it is valid.")
     st.stop()
 
-# ---- Load Hugging Face LLM ----
+# 3. Setup HuggingFace LLM
 llm = HuggingFaceHub(
     repo_id="google/flan-t5-base",
     model_kwargs={"temperature": 0.5, "max_length": 512},
     huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN")
 )
 
-# ---- QA Chain ----
 qa = RetrievalQA.from_chain_type(
     llm=llm,
     retriever=vectorstore.as_retriever(),
     return_source_documents=False
 )
 
-# ---- Input ----
+# 4. Streamlit UI
+st.set_page_config(page_title="UNFPA Evaluation Chatbot", page_icon="🤖", layout="centered")
+st.markdown("<h1 style='text-align: center;'>🤖 UNFPA Evaluation Chatbot</h1>", unsafe_allow_html=True)
+st.write("Ask questions based on uploaded UNFPA CPE evaluation documents.")
+
 query = st.text_input("🔍 Your question:")
 
 if query:
@@ -61,4 +57,4 @@ if query:
         else:
             st.success(answer)
     except Exception as e:
-        st.error(f"⚠️ Error occurred: {e}")
+        st.error("⚠️ Error occurred. Try rephrasing your question.")
